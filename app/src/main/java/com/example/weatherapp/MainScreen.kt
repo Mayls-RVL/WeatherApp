@@ -1,12 +1,14 @@
 package com.example.weatherapp.ui.main
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,30 +16,45 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.weatherapp.data.remote.model.WeatherResponse
+import com.example.weatherapp.R
+import com.example.weatherapp.data.local.WeatherDataStore
+import com.example.weatherapp.data.repository.WeatherRepository
 import java.text.SimpleDateFormat
 import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: WeatherViewModel = WeatherViewModel()) {
+fun MainScreen() {
+
+    val context = LocalContext.current
+
+    // Proper ViewModel creation
+    val viewModel = remember {
+        WeatherViewModel(
+            repository = WeatherRepository(),
+            dataStore = WeatherDataStore(context)
+        )
+    }
 
     val uiState by viewModel.uiState.collectAsState()
     val history by viewModel.history.collectAsState()
 
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("Current Weather", "History")
     var cityQuery by remember { mutableStateOf("") }
+    var showDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        viewModel.fetchWeather(51.5074, -0.1278)
-    }
+    val tabs = listOf("Current Weather", "History")
 
     Scaffold(
         topBar = {
@@ -53,6 +70,16 @@ fun MainScreen(viewModel: WeatherViewModel = WeatherViewModel()) {
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Weather Weather Lang")
+                        }
+                    },
+                    actions = {
+                        if (selectedTab == 1 && history.isNotEmpty()) {
+                            IconButton(onClick = { showDialog = true }) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.trash_bin),
+                                    contentDescription = "Clear History"
+                                )
+                            }
                         }
                     }
                 )
@@ -104,6 +131,7 @@ fun MainScreen(viewModel: WeatherViewModel = WeatherViewModel()) {
             }
         }
     ) { paddingValues ->
+
         Column(modifier = Modifier.padding(paddingValues)) {
 
             TabRow(selectedTabIndex = selectedTab) {
@@ -119,6 +147,7 @@ fun MainScreen(viewModel: WeatherViewModel = WeatherViewModel()) {
 
             when (selectedTab) {
                 0 -> CurrentWeatherScreen(uiState)
+
                 1 -> WeatherHistoryScreen(
                     history = history,
                     onItemClick = { selectedItem ->
@@ -129,11 +158,60 @@ fun MainScreen(viewModel: WeatherViewModel = WeatherViewModel()) {
             }
         }
     }
+
+    // Clear History Dialog
+    if (showDialog) {
+        Dialog(
+            onDismissRequest = { showDialog = false },
+            properties = DialogProperties(dismissOnClickOutside = true)
+        ) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Clear all history?",
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(onClick = { showDialog = false }) {
+                            Text("Cancel")
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.clearHistory()
+                                showDialog = false
+                            }
+                        ) {
+                            Text("Clear")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
+
 
 @Composable
 fun CurrentWeatherScreen(uiState: WeatherUiState) {
+
     when (uiState) {
+
         is WeatherUiState.Loading -> {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -142,92 +220,116 @@ fun CurrentWeatherScreen(uiState: WeatherUiState) {
                 CircularProgressIndicator()
             }
         }
+
         is WeatherUiState.Error -> {
-            Text(
-                text = "Error: ${uiState.message}",
-                modifier = Modifier.padding(16.dp)
-            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Error: ${uiState.message}",
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
+
         is WeatherUiState.Success -> {
+
             val weather = uiState.data
-            Column(
+            val condition = weather.weather.firstOrNull()
+
+            // 🌙 Time Calculation
+            val utcTime = System.currentTimeMillis() / 1000L
+            val cityLocalTime = utcTime + weather.timezone
+            val localHour = (cityLocalTime % 86400) / 3600
+            val isNight =
+                localHour >= 18 || localHour < (weather.sys.sunrise % 86400) / 3600
+
+            // 🌤 Weather Icon
+            val iconRes = when (condition?.main) {
+                "Clear" -> if (isNight) R.drawable.night else R.drawable.sunny
+                "Clouds" -> if (isNight) R.drawable.cloudynight else R.drawable.cloudy
+                "Rain" -> R.drawable.rain
+                "Snow" -> R.drawable.snow
+                "Thunderstorm" -> R.drawable.thunderstorm
+                else -> R.drawable.sunny
+            }
+
+            // 🎨 Background color for entire screen
+            val backgroundColor =
+                if (isNight) MaterialTheme.colorScheme.primary
+                else Color.White
+
+            val textColor =
+                if (isNight) MaterialTheme.colorScheme.onPrimary
+                else Color.Black
+
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(backgroundColor)
                     .padding(16.dp)
             ) {
-                CityTempCard(weather)
-                Spacer(modifier = Modifier.height(16.dp))
-                WeatherForecastCard(weather)
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    SunriseCard(weather, Modifier.weight(1f))
-                    SunsetCard(weather, Modifier.weight(1f))
+
+                    Text(
+                        text = "${weather.name}, ${weather.sys.country}",
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = textColor,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 32.dp)
+                    )
+
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 🌤 Weather Icon
+                    Image(
+                        painter = painterResource(id = iconRes),
+                        contentDescription = condition?.main ?: "Weather Icon",
+                        modifier = Modifier.size(120.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 🌡 Temperature
+                    Text(
+                        text = "${weather.main.temp.toInt()}°C",
+                        style = MaterialTheme.typography.displayMedium,
+                        color = textColor
+                    )
+
+                    Text(
+                        text = "Feels like ${weather.main.feels_like.toInt()}°C",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = textColor,
+                        modifier = Modifier.padding(bottom = 24.dp)
+                    )
+
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    WeatherForecastCard(weather)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        SunriseCard(weather, Modifier.weight(1f))
+                        SunsetCard(weather, Modifier.weight(1f))
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-fun CityTempCard(weather: WeatherResponse) {
-    val condition = weather.weather.firstOrNull()
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(300.dp),
-        shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.cardElevation(10.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primary
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(top = 40.dp, start = 32.dp, end = 32.dp, bottom = 32.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-
-            // 🌆 City Name
-            Text(
-                text = "${weather.name}, ${weather.sys.country}",
-                style = MaterialTheme.typography.headlineLarge,
-                color = MaterialTheme.colorScheme.onPrimary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(bottom = 20.dp)
-            )
-
-            // 🌤 Weather Icon
-            val iconVector = when (condition?.main) {
-                "Clear" -> Icons.Default.WbSunny
-                "Clouds" -> Icons.Default.Cloud
-                "Rain" -> Icons.Default.Umbrella
-                "Snow" -> Icons.Default.AcUnit
-                else -> Icons.Default.WbSunny
-            }
-
-            Icon(
-                imageVector = iconVector,
-                contentDescription = condition?.main ?: "Weather Icon",
-                modifier = Modifier.size(80.dp),
-                tint = MaterialTheme.colorScheme.onPrimary
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // 🌡 Temperature
-            Text(
-                text = "${weather.main.temp.toInt()}°C",
-                style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.onPrimary
-            )
-        }
-    }
-}
 
 
 
@@ -235,10 +337,10 @@ fun CityTempCard(weather: WeatherResponse) {
 fun WeatherForecastCard(weather: WeatherResponse) {
     val condition = weather.weather.firstOrNull()
     val gradientColors = when (condition?.main) {
-        "Rain" -> listOf(Color(0xFF90A4AE), Color(0xFF64B5F6)) // Gray -> Blue
-        "Snow" -> listOf(Color(0xFFFFFFFF), Color(0xFFB3E5FC)) // White -> Light Blue
-        "Clear" -> listOf(Color(0xFFFFF59D), Color(0xFFFFC107)) // Yellow -> Orange
-        "Clouds" -> listOf(Color(0xFFCFD8DC), Color(0xFFB0BEC5)) // Light Gray -> Gray
+        "Rain" -> listOf(Color(0xFF90A4AE), Color(0xFF64B5F6))
+        "Snow" -> listOf(Color(0xFFFFFFFF), Color(0xFFB3E5FC))
+        "Clear" -> listOf(Color(0xFFFFF59D), Color(0xFFFFC107))
+        "Clouds" -> listOf(Color(0xFFCFD8DC), Color(0xFFB0BEC5))
         else -> listOf(Color(0xFFE0E0E0), Color(0xFFBDBDBD))
     }
 
@@ -255,28 +357,55 @@ fun WeatherForecastCard(weather: WeatherResponse) {
                 .background(Brush.verticalGradient(gradientColors)),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    condition?.main ?: "N/A",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
-                    ),
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    condition?.description ?: "",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
-                    ),
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Condition Column
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = condition?.main ?: "N/A",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
+                        ),
+                        color = Color.White
+                    )
+                    Text(
+                        text = condition?.description ?: "",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
+                        ),
+                        color = Color.White
+                    )
+                }
+
+                // Humidity Column
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Humidity",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
+                        ),
+                        color = Color.White
+                    )
+                    Text(
+                        text = "${weather.main.humidity}%",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
+                        ),
+                        color = Color.White
+                    )
+                }
             }
         }
     }
 }
+
+
+
 
 @Composable
 fun SunriseCard(weather: WeatherResponse, modifier: Modifier = Modifier) {
@@ -306,7 +435,7 @@ fun SunriseCard(weather: WeatherResponse, modifier: Modifier = Modifier) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    formatTime(weather.sys.sunrise),
+                    formatTime(weather.sys.sunrise, weather.timezone),
                     color = Color.White,
                     style = MaterialTheme.typography.headlineSmall.copy(
                         shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
@@ -346,7 +475,7 @@ fun SunsetCard(weather: WeatherResponse, modifier: Modifier = Modifier) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    formatTime(weather.sys.sunset),
+                    formatTime(weather.sys.sunset, weather.timezone),
                     color = Color.White,
                     style = MaterialTheme.typography.headlineSmall.copy(
                         shadow = Shadow(Color.Black, Offset(2f, 2f), 4f)
@@ -358,8 +487,12 @@ fun SunsetCard(weather: WeatherResponse, modifier: Modifier = Modifier) {
     }
 }
 
+
 @Composable
-fun WeatherHistoryScreen(history: List<WeatherUiState.Success>, onItemClick: (WeatherUiState.Success) -> Unit) {
+fun WeatherHistoryScreen(
+    history: List<WeatherUiState.Success>,
+    onItemClick: (WeatherUiState.Success) -> Unit
+) {
     if (history.isEmpty()) {
         Text("No history yet.", modifier = Modifier.padding(16.dp))
     } else {
@@ -387,7 +520,9 @@ fun WeatherCardContent(weather: WeatherResponse) {
     }
 }
 
-fun formatTime(timestamp: Long): String {
+fun formatTime(timestamp: Long, timezoneOffset: Long): String {
+    val date = Date((timestamp + timezoneOffset) * 1000)
     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-    return sdf.format(Date(timestamp * 1000))
+    sdf.timeZone = TimeZone.getTimeZone("UTC")
+    return sdf.format(date)
 }

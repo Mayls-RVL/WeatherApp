@@ -6,15 +6,6 @@ import retrofit2.http.Query
 
 interface WeatherApiService {
 
-    // 1️⃣ Fetch current weather by latitude and longitude
-    @GET("weather")
-    suspend fun getCurrentWeather(
-        @Query("lat") lat: Double,
-        @Query("lon") lon: Double,
-        @Query("appid") apiKey: String,
-        @Query("units") units: String = "metric" // Celsius
-    ): WeatherResponse
-
     // 2️⃣ Fetch current weather by city name (or city, country)
     @GET("weather")
     suspend fun getCurrentWeatherByCity(

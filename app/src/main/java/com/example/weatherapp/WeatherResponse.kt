@@ -3,11 +3,13 @@ package com.example.weatherapp.data.remote.model
 import com.google.gson.annotations.SerializedName
 
 data class WeatherResponse(
-    val name: String, // City
+    val name: String,
     val sys: Sys,
     val main: Main,
-    val weather: List<Weather>
+    val weather: List<Weather>,
+    val timezone: Long
 )
+
 
 data class Sys(
     val country: String,
@@ -16,8 +18,11 @@ data class Sys(
 )
 
 data class Main(
-    val temp: Float
+    val temp: Float,
+    val feels_like: Float,
+    val humidity: Int
 )
+
 
 data class Weather(
     val main: String, // e.g., Rain, Clear, Clouds
